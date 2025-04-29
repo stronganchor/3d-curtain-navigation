@@ -2,8 +2,8 @@
 /*
 Plugin Name: 3D Curtain Navigation
 Plugin URI: https://github.com/stronganchor/3d-curtain-navigation/
-Description: Adds a 3D curtain-like page transition effect to your site by animating sections using GSAP.
-Version: 1.1
+Description: Adds a 3D curtain-like page transition effect to your site by animating sections using GSAP. Automatically rewrites your primary navigation links so no menu markup changes are needed.
+Version: 1.2
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
@@ -11,18 +11,45 @@ Author URI: https://stronganchortech.com
 if ( ! defined( 'ABSPATH' ) ) exit;
 
 /**
- * Enqueue GSAP and our inline styles and scripts
+ * Rewrite internal nav menu links to hashed anchors (no menu edits required)
+ */
+add_filter( 'nav_menu_link_attributes', 'dcn_filter_menu_links', 10, 4 );
+function dcn_filter_menu_links( $atts, $item, $args, $depth ) {
+    if ( empty( $atts['href'] ) ) return $atts;
+    // Skip external and already-hash URLs
+    if ( strpos( $atts['href'], '#' ) === 0 ) return $atts;
+    $home = home_url();
+    $href = $atts['href'];
+    // Resolve relative URLs
+    if ( strpos( $href, '/' ) === 0 ) {
+        $url = $home . $href;
+    } elseif ( strpos( $href, $home ) === 0 ) {
+        $url = $href;
+    } else {
+        return $atts;
+    }
+    // Extract slug from path
+    $path = parse_url( $url, PHP_URL_PATH );
+    $slug = trim( $path, '/' );
+    if ( '' === $slug ) $slug = 'home';
+    // Store original for history update
+    $atts['data-dcn-url'] = esc_url( $url );
+    // Rewrite href to our section anchor
+    $atts['href'] = '#' . sanitize_html_class( $slug );
+    return $atts;
+}
+
+/**
+ * Enqueue GSAP + inline CSS & JS
  */
 function dcn_enqueue_assets() {
-    // Register and enqueue inline CSS
+    // CSS
     wp_register_style( 'dcn-style', false );
     wp_enqueue_style( 'dcn-style' );
     wp_add_inline_style( 'dcn-style', dcn_inline_css() );
-
-    // Enqueue GSAP core
+    // GSAP
     wp_enqueue_script( 'dcn-gsap', 'https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js', array(), '3.12.2', true );
-
-    // Register and enqueue inline JS
+    // Inline JS
     wp_register_script( 'dcn-script', false, array( 'dcn-gsap' ), null, true );
     wp_enqueue_script( 'dcn-script' );
     wp_add_inline_script( 'dcn-script', dcn_inline_js() );
@@ -30,7 +57,7 @@ function dcn_enqueue_assets() {
 add_action( 'wp_enqueue_scripts', 'dcn_enqueue_assets' );
 
 /**
- * Basic full-screen 3D container styles
+ * Full-screen 3D container CSS
  */
 function dcn_inline_css() {
     return "
@@ -41,44 +68,36 @@ html, body { height: 100%; overflow: hidden; margin: 0; perspective: 800px; }
 }
 
 /**
- * Bind click handlers to any menu links (<nav> anchors) that reference #anchors
+ * Core JS: animate sections, update history to original URL
  */
 function dcn_inline_js() {
-    return "
-(function(){
+    return "(function(){
     document.addEventListener('DOMContentLoaded', function(){
-        // Collect all sections by ID
         var sections = {};
         document.querySelectorAll('.dcn-section').forEach(function(sec, idx){
-            sections[sec.id] = sec;
+            var id = sec.id || 'home';
+            sections[id] = sec;
             if(idx === 0) sec.classList.add('current');
         });
-
-        // Bind to all <nav> links with hash targets
         document.querySelectorAll('nav a').forEach(function(link){
-            if(!link.hash) return;
-            var targetID = link.hash.replace('#','');
+            // We now rewrite all internal links, so if hash matches a section, bind click
+            var targetID = link.getAttribute('href').replace('#','');
             if(!sections[targetID]) return;
-
             link.addEventListener('click', function(e){
                 e.preventDefault();
                 var current = document.querySelector('.dcn-section.current');
                 var next    = sections[targetID];
-                // Animate current out
                 gsap.to(current, { z: 300, opacity: 0, duration: 1 });
-                // Animate next in
-                gsap.fromTo(next,
-                    { z: -300, opacity: 0 },
-                    {
-                        z: 0,
-                        opacity: 1,
-                        duration: 1,
-                        onStart: function(){ next.classList.add('current'); },
-                        onComplete: function(){ current.classList.remove('current'); }
-                    }
-                );
-                // Update URL
-                history.pushState(null,'','#'+targetID);
+                gsap.fromTo(next, { z: -300, opacity: 0 }, {
+                    z: 0,
+                    opacity: 1,
+                    duration: 1,
+                    onStart: function(){ next.classList.add('current'); },
+                    onComplete: function(){ current.classList.remove('current'); }
+                });
+                // push to original URL if stored
+                var dest = link.dataset.dcnUrl || '#'+targetID;
+                history.pushState(null, '', dest);
             });
         });
     });
