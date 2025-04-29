@@ -2,8 +2,8 @@
 /*
 Plugin Name: 3D Curtain Navigation
 Plugin URI: https://github.com/stronganchor/3d-curtain-navigation/
-Description: Adds a 3D curtain-like page transition effect by animating full-screen sections using GSAP. Includes a shortcode to auto-render sections & navigation so no manual markup is required, and supports Elementor-built pages.
-Version: 1.4
+Description: Adds a 3D curtain-like page transition effect by animating full-screen sections using GSAP. Includes a shortcode to auto-render sections & navigation so no manual markup is required, and supports Elementor-built pages. Allows scrolling to cycle through sections.
+Version: 1.5
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
@@ -31,7 +31,7 @@ function dcn_filter_menu_links( $atts, $item, $args, $depth ) {
 }
 
 /**
- * Enqueue GSAP + inline CSS & JS
+ * Enqueue GSAP, ScrollTrigger + inline CSS & JS
  */
 add_action( 'wp_enqueue_scripts', 'dcn_enqueue_assets' );
 function dcn_enqueue_assets() {
@@ -39,10 +39,11 @@ function dcn_enqueue_assets() {
     wp_register_style( 'dcn-style', false );
     wp_enqueue_style( 'dcn-style' );
     wp_add_inline_style( 'dcn-style', dcn_inline_css() );
-    // GSAP
+    // GSAP core + ScrollTrigger
     wp_enqueue_script( 'dcn-gsap', 'https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js', [], '3.12.2', true );
+    wp_enqueue_script( 'dcn-scrolltrigger', 'https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/ScrollTrigger.min.js', ['dcn-gsap'], '3.12.2', true );
     // Core script
-    wp_register_script( 'dcn-script', false, ['dcn-gsap'], null, true );
+    wp_register_script( 'dcn-script', false, ['dcn-gsap','dcn-scrolltrigger'], null, true );
     wp_enqueue_script( 'dcn-script' );
     wp_add_inline_script( 'dcn-script', dcn_inline_js() );
 }
@@ -59,28 +60,58 @@ CSS;
 function dcn_inline_js() {
     return <<<'JS'
 (function(){
+  gsap.registerPlugin(ScrollTrigger);
   document.addEventListener('DOMContentLoaded', function(){
-    var sections = {};
+    var sections = {}, order = [];
     document.querySelectorAll('.dcn-section').forEach(function(sec, idx){
       var id = sec.id || 'home';
       sections[id] = sec;
+      order.push(id);
       if(idx === 0) sec.classList.add('current');
     });
+    var curIndex = 0, animating = false;
+    function goTo(index, url) {
+      if(animating || index===curIndex || index<0 || index>=order.length) return;
+      animating = true;
+      var cur = sections[ order[curIndex] ];
+      var nxt = sections[ order[index] ];
+      gsap.to(cur, { z: 300, opacity: 0, duration: 1 });
+      gsap.fromTo(nxt, { z: -300, opacity: 0 }, { z: 0, opacity: 1, duration: 1,
+        onStart: function(){ nxt.classList.add('current'); },
+        onComplete: function(){ cur.classList.remove('current'); animating=false; }
+      });
+      curIndex = index;
+      history.pushState(null,'', url || '#'+order[index] );
+    }
+    // Click bindings
     document.querySelectorAll('.dcn-nav a').forEach(function(link){
       var target = link.getAttribute('href').replace('#','');
-      if(!sections[target]) return;
+      var original = link.dataset.dcnUrl;
+      if(!(target in sections)) return;
       link.addEventListener('click', function(e){
         e.preventDefault();
-        var cur = document.querySelector('.dcn-section.current');
-        var nxt = sections[target];
-        gsap.to(cur, { z: 300, opacity: 0, duration: 1 });
-        gsap.fromTo(nxt, { z: -300, opacity: 0 }, { z: 0, opacity: 1, duration: 1,
-          onStart: function(){ nxt.classList.add('current'); },
-          onComplete: function(){ cur.classList.remove('current'); }
-        });
-        var dest = link.dataset.dcnUrl || '#'+target;
-        history.pushState(null,'',dest);
+        var idx = order.indexOf(target);
+        goTo(idx, original);
       });
+    });
+    // Wheel/scroll bindings
+    window.addEventListener('wheel', function(e){
+      if(e.deltaY>10) goTo(curIndex+1);
+      else if(e.deltaY<-10) goTo(curIndex-1);
+    }, { passive: true });
+    // Keyboard arrows
+    window.addEventListener('keydown', function(e){
+      if(e.key==='ArrowDown'||e.key==='PageDown') { e.preventDefault(); goTo(curIndex+1); }
+      if(e.key==='ArrowUp'||e.key==='PageUp') { e.preventDefault(); goTo(curIndex-1); }
+    });
+    // Optional: ScrollTrigger snap (for touch/scrollbar)
+    ScrollTrigger.create({
+      start: 0,
+      end: () => window.innerHeight*(order.length-1),
+      snap: {
+        snapTo: i => Math.round(i/(window.innerHeight))*window.innerHeight,
+        duration: 1
+      }
     });
   });
 })();
@@ -106,7 +137,6 @@ function dcn_render_sections( $atts ) {
     if ( $item->object !== 'page' ) continue;
     $pid  = $item->object_id;
     $slug = sanitize_html_class( get_post_field('post_name',$pid) ?: 'home' );
-    // Elementor support
     if ( class_exists('Elementor\Plugin') && \Elementor\Plugin::instance()->db->is_built_with_elementor($pid) ) {
       $content = \Elementor\Plugin::instance()->frontend->get_builder_content_for_display($pid);
     } else {
