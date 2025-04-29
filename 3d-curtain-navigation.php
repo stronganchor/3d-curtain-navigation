@@ -2,8 +2,8 @@
 /*
 Plugin Name: 3D Curtain Navigation
 Plugin URI: https://github.com/stronganchor/3d-curtain-navigation/
-Description: Adds a 3D curtain-like page transition effect by animating full-screen sections using GSAP. Scroll is now tied to a master timeline, and a hidden spacer element creates the scrollable area so fast or slow scrolls scrub through panels.
-Version: 1.12
+Description: Adds a 3D curtain-like page transition effect by animating full-screen sections using GSAP. Scroll is now tied directly to the wrapper’s scrollTop, so fast or slow scrolls scrub smoothly, and default page scroll is disabled.
+Version: 1.13
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
@@ -58,15 +58,18 @@ function dcn_inline_css() {
     return <<<CSS
 html, body {
   margin: 0;
-  padding: 0;
+  height: 100%;
+  overflow: hidden;               /* disable default page scroll */
 }
 .dcn-wrapper {
   position: relative;
   width: 100%;
   height: 100vh;
-  overflow: hidden;
+  overflow-y: auto;               /* only this container scrolls */
+  overflow-x: hidden;
   perspective: 1000px;
   perspective-origin: center center;
+  overscroll-behavior: none;      /* prevent bounce / outer scroll */
 }
 .dcn-nav {
   position: fixed;
@@ -109,20 +112,19 @@ function dcn_inline_js() {
       order.push(id);
       if (i === 0) {
         sec.classList.add('current');
-        gsap.set(sec, { z:0, autoAlpha:1 });
+        gsap.set(sec, { z: 0, autoAlpha: 1 });
       }
     });
 
     // build timeline: each panel transition occupies 1 unit
     const tl = gsap.timeline({
       scrollTrigger: {
-        trigger:    wrapper,
+        scroller:   wrapper,                           // use wrapper’s scrollTop
         start:      'top top',
-        end:        () => '+=' + (window.innerHeight * (order.length - 1)),
-        scrub:      0.1,
-        snap:       1 / (order.length - 1),
-        pin:        true,
-        anticipatePin: 1
+        end:        () => wrapper.scrollHeight - wrapper.clientHeight,
+        scrub:      true,                              // scrub exactly to scroll
+        snap:       1 / (order.length - 1),            // snap to nearest
+        invalidateOnRefresh: true
       }
     });
 
@@ -132,7 +134,7 @@ function dcn_inline_js() {
       const prev = sections[ order[i-1] ];
       const cur  = sections[ id ];
 
-      // 1) exit previous
+      // exit previous
       tl.to(prev, {
         z:        300,
         opacity:  0,
@@ -140,13 +142,13 @@ function dcn_inline_js() {
         ease:     'power2.in'
       }, i - 1);
 
-      // 2) prepare current behind camera
+      // prepare current behind camera
       tl.set(cur, {
         z:        -300,
         opacity:  0
       }, i - 1 + 0.01);
 
-      // 3) enter current
+      // enter current
       tl.to(cur, {
         z:        0,
         opacity:  1,
@@ -154,7 +156,7 @@ function dcn_inline_js() {
         ease:     'power2.out',
         onStart:  () => {
           document.querySelectorAll('.dcn-section.current')
-            .forEach(el=>el.classList.remove('current'));
+            .forEach(el => el.classList.remove('current'));
           cur.classList.add('current');
         }
       }, i - 1 + 0.01);
@@ -164,7 +166,7 @@ function dcn_inline_js() {
 JS;
 }
 
-// Shortcode to output nav + sections, plus hidden spacer to enable scrolling
+// Shortcode to output nav + sections, plus hidden spacer inside wrapper
 add_shortcode('dcn_sections', 'dcn_render_sections');
 function dcn_render_sections($atts) {
   $atts = shortcode_atts(['menu'=>'primary'], $atts, 'dcn_sections');
@@ -174,12 +176,10 @@ function dcn_render_sections($atts) {
   $menu  = wp_get_nav_menu_object($locs[$atts['menu']]);
   $items = wp_get_nav_menu_items($menu->term_id);
 
-  // filter only page items
-  $pages = array_filter($items, function($itm){
-    return $itm->object==='page';
-  });
+  // only pages
+  $pages = array_filter($items, fn($itm)=> $itm->object==='page' );
   $count = count($pages);
-  if ($count === 0) return '';
+  if ($count < 1) return '';
 
   // wrapper + nav
   $out  = '<div class="dcn-wrapper">';
@@ -190,7 +190,7 @@ function dcn_render_sections($atts) {
     'menu_class' => 'dcn-nav',
   ]);
 
-  // sections
+  // each section
   foreach ($pages as $item) {
     $pid  = $item->object_id;
     $slug = sanitize_html_class(get_post_field('post_name',$pid) ?: 'home');
@@ -210,13 +210,12 @@ function dcn_render_sections($atts) {
     $out .= "<div id=\"{$slug}\" class=\"dcn-section\">{$content}</div>\n";
   }
 
-  $out .= '</div>';
-
-  // spacer to create scroll height = (panels - 1) full viewports
+  // spacer inside so wrapper can scroll exactly the needed height
   if ($count > 1) {
     $spacer_vh = ($count - 1) * 100;
     $out      .= "<div class=\"dcn-spacer\" style=\"height:{$spacer_vh}vh\"></div>";
   }
 
+  $out .= '</div>';
   return $out;
 }
