@@ -3,7 +3,7 @@
 Plugin Name: 3D Curtain Navigation
 Plugin URI: https://github.com/stronganchor/3d-curtain-navigation/
 Description: Adds a 3D curtain-like page transition effect by animating full-screen sections using GSAP. Includes a shortcode to auto-render sections & navigation so no manual markup is required, and supports Elementor-built pages. Allows scrolling to cycle through sections with true 3D transitions.
-Version: 1.8
+Version: 1.9
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
@@ -52,8 +52,8 @@ function dcn_inline_css() {
     return <<<CSS
 html, body { height:100%; overflow:hidden; margin:0; perspective:1000px; }
 .dcn-nav { position:fixed; top:0; width:100%; z-index:999; }
-.dcn-section { position:absolute; top:0; left:0; width:100%; height:100%; transform-style:preserve-3d; opacity:0; }
-.dcn-section.current { opacity:1; transform: translateZ(0); }
+.dcn-section { position:absolute; top:0; left:0; width:100%; height:100%; transform-style:preserve-3d; transform-origin:center center; transform:translateZ(0); opacity:0; }
+.dcn-section.current { opacity:1; }
 CSS;
 }
 
@@ -85,8 +85,8 @@ function dcn_inline_js() {
       });
       // Exit current: move forward in Z (grows) & fade
       tl.to(cur, { z:300, opacity:0, duration:1, ease:'power2.in' });
-      // Show next after slight overlap
-      tl.add(function(){ nxt.classList.add('current'); }, '>-0.1');
+      // Show next after exit finishes
+      tl.add(function(){ nxt.classList.add('current'); }, '+=0');
       // Entrance next: move from behind and fade in
       tl.fromTo(nxt, { z:-300, opacity:0 }, { z:0, opacity:1, duration:1, ease:'power2.out' }, '>-0.1');
     }
