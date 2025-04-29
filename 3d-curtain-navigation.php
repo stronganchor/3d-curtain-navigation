@@ -2,8 +2,8 @@
 /*
 Plugin Name: 3D Curtain Navigation
 Plugin URI: https://github.com/stronganchor/3d-curtain-navigation/
-Description: Adds a 3D curtain-like page transition effect by animating full-screen sections using GSAP. Includes a shortcode to auto-render sections & navigation so no manual markup is required, and supports Elementor-built pages. Allows scrolling to cycle through sections.
-Version: 1.5
+Description: Adds a 3D curtain-like page transition effect by animating full-screen sections using GSAP. Includes a shortcode to auto-render sections & navigation so no manual markup is required, and supports Elementor-built pages. Allows scrolling to cycle through sections with scale-based 3D transitions.
+Version: 1.6
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
@@ -50,9 +50,9 @@ function dcn_enqueue_assets() {
 
 function dcn_inline_css() {
     return <<<CSS
-html, body { height: 100%; overflow: hidden; margin: 0; perspective: 800px; }
+html, body { height: 100%; overflow: hidden; margin: 0; perspective: 1000px; }
 .dcn-nav { position: fixed; top: 0; width: 100%; z-index: 999; }
-.dcn-section { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform-style: preserve-3d; opacity: 0; }
+.dcn-section { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform-style: preserve-3d; transform-origin: center center; opacity: 0; }
 .dcn-section.current { opacity: 1; }
 CSS;
 }
@@ -75,11 +75,16 @@ function dcn_inline_js() {
       animating = true;
       var cur = sections[ order[curIndex] ];
       var nxt = sections[ order[index] ];
-      gsap.to(cur, { z: 300, opacity: 0, duration: 1 });
-      gsap.fromTo(nxt, { z: -300, opacity: 0 }, { z: 0, opacity: 1, duration: 1,
-        onStart: function(){ nxt.classList.add('current'); },
-        onComplete: function(){ cur.classList.remove('current'); animating=false; }
-      });
+      // Animate current: scale up and fade out
+      gsap.to(cur, { scale: 1.3, opacity: 0, duration: 1, ease: 'power2.in' });
+      // Animate next: start slightly smaller, fade in and scale to normal
+      gsap.fromTo(nxt,
+        { scale: 0.8, opacity: 0 },
+        { scale: 1, opacity: 1, duration: 1, ease: 'power2.out',
+          onStart: function(){ nxt.classList.add('current'); },
+          onComplete: function(){ cur.classList.remove('current'); animating=false; }
+        }
+      );
       curIndex = index;
       history.pushState(null,'', url || '#'+order[index] );
     }
@@ -104,7 +109,7 @@ function dcn_inline_js() {
       if(e.key==='ArrowDown'||e.key==='PageDown') { e.preventDefault(); goTo(curIndex+1); }
       if(e.key==='ArrowUp'||e.key==='PageUp') { e.preventDefault(); goTo(curIndex-1); }
     });
-    // Optional: ScrollTrigger snap (for touch/scrollbar)
+    // Optional: ScrollTrigger snap
     ScrollTrigger.create({
       start: 0,
       end: () => window.innerHeight*(order.length-1),
