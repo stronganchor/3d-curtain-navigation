@@ -2,8 +2,8 @@
 /*
 Plugin Name: 3D Curtain Navigation
 Plugin URI: https://github.com/stronganchor/3d-curtain-navigation/
-Description: Adds a 3D curtain-like page transition effect by animating full-screen sections using GSAP. Scroll speed is now directly mapped to the curtain animation.
-Version: 1.11
+Description: Adds a 3D curtain-like page transition effect by animating full-screen sections using GSAP. Scroll is now tied to a master timeline, and a hidden spacer element creates the scrollable area so fast or slow scrolls scrub through panels.
+Version: 1.12
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
@@ -39,11 +39,17 @@ function dcn_enqueue_assets() {
     wp_add_inline_style( 'dcn-style', dcn_inline_css() );
 
     // GSAP core + ScrollTrigger
-    wp_enqueue_script( 'dcn-gsap', 'https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js', [], '3.12.2', true );
-    wp_enqueue_script( 'dcn-scrolltrigger', 'https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/ScrollTrigger.min.js', ['dcn-gsap'], '3.12.2', true );
+    wp_enqueue_script( 'dcn-gsap',
+        'https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js',
+        [], '3.12.2', true
+    );
+    wp_enqueue_script( 'dcn-scrolltrigger',
+        'https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/ScrollTrigger.min.js',
+        ['dcn-gsap'], '3.12.2', true
+    );
 
     // Main script
-    wp_register_script( 'dcn-script', false, ['dcn-gsap', 'dcn-scrolltrigger'], null, true );
+    wp_register_script( 'dcn-script', false, ['dcn-gsap','dcn-scrolltrigger'], null, true );
     wp_enqueue_script( 'dcn-script' );
     wp_add_inline_script( 'dcn-script', dcn_inline_js() );
 }
@@ -52,8 +58,7 @@ function dcn_inline_css() {
     return <<<CSS
 html, body {
   margin: 0;
-  height: 100%;
-  overflow: hidden;
+  padding: 0;
 }
 .dcn-wrapper {
   position: relative;
@@ -80,6 +85,10 @@ html, body {
 .dcn-section.current {
   opacity: 1;
 }
+.dcn-spacer {
+  width: 1px;
+  visibility: hidden;
+}
 CSS;
 }
 
@@ -93,60 +102,59 @@ function dcn_inline_js() {
     const sections = {};
     const order    = [];
 
-    // gather sections
-    document.querySelectorAll('.dcn-section').forEach((sec, idx) => {
+    // collect sections
+    document.querySelectorAll('.dcn-section').forEach((sec, i) => {
       const id = sec.id || 'home';
       sections[id] = sec;
       order.push(id);
-      if (idx === 0) {
+      if (i === 0) {
         sec.classList.add('current');
-        gsap.set(sec, { z: 0, autoAlpha: 1 });
+        gsap.set(sec, { z:0, autoAlpha:1 });
       }
     });
 
-    // build a master timeline where each section exit + entry spans 1 unit
+    // build timeline: each panel transition occupies 1 unit
     const tl = gsap.timeline({
       scrollTrigger: {
         trigger:    wrapper,
         start:      'top top',
         end:        () => '+=' + (window.innerHeight * (order.length - 1)),
-        scrub:      0.1,                    // ties playhead to scroll, smoothing of 0.1s
-        snap:       1 / (order.length - 1), // snap to nearest section on release
-        pin:        true,                   // lock wrapper while scrolling
+        scrub:      0.1,
+        snap:       1 / (order.length - 1),
+        pin:        true,
         anticipatePin: 1
       }
     });
 
-    // for each section after the first, add exit + enter tweens at timeline positions 0,1,2...
+    // for each next panel, schedule exit + enter at times 0,1,2...
     order.forEach((id, i) => {
       if (i === 0) return;
       const prev = sections[ order[i-1] ];
-      const cur  = sections[id];
+      const cur  = sections[ id ];
 
-      // exit previous
+      // 1) exit previous
       tl.to(prev, {
-        z:         300,
-        opacity:   0,
-        duration:  1,
-        ease:      'power2.in'
+        z:        300,
+        opacity:  0,
+        duration: 1,
+        ease:     'power2.in'
       }, i - 1);
 
-      // prep next just behind camera
+      // 2) prepare current behind camera
       tl.set(cur, {
-        z:         -300,
-        opacity:   0
+        z:        -300,
+        opacity:  0
       }, i - 1 + 0.01);
 
-      // enter next
+      // 3) enter current
       tl.to(cur, {
-        z:         0,
-        opacity:   1,
-        duration:  1,
-        ease:      'power2.out',
-        onStart: () => {
-          // swap "current" class for styling if you need it
+        z:        0,
+        opacity:  1,
+        duration: 1,
+        ease:     'power2.out',
+        onStart:  () => {
           document.querySelectorAll('.dcn-section.current')
-            .forEach(el => el.classList.remove('current'));
+            .forEach(el=>el.classList.remove('current'));
           cur.classList.add('current');
         }
       }, i - 1 + 0.01);
@@ -156,17 +164,24 @@ function dcn_inline_js() {
 JS;
 }
 
-// Shortcode to output nav + sections wrapped in our 3D stage
+// Shortcode to output nav + sections, plus hidden spacer to enable scrolling
 add_shortcode('dcn_sections', 'dcn_render_sections');
 function dcn_render_sections($atts) {
-  $atts = shortcode_atts(['menu' => 'primary'], $atts, 'dcn_sections');
+  $atts = shortcode_atts(['menu'=>'primary'], $atts, 'dcn_sections');
   $locs = get_nav_menu_locations();
-  if ( empty($locs[$atts['menu']]) ) {
-    return '';
-  }
+  if ( empty($locs[$atts['menu']]) ) return '';
+
   $menu  = wp_get_nav_menu_object($locs[$atts['menu']]);
   $items = wp_get_nav_menu_items($menu->term_id);
 
+  // filter only page items
+  $pages = array_filter($items, function($itm){
+    return $itm->object==='page';
+  });
+  $count = count($pages);
+  if ($count === 0) return '';
+
+  // wrapper + nav
   $out  = '<div class="dcn-wrapper">';
   $out .= wp_nav_menu([
     'menu'       => $menu->term_id,
@@ -175,11 +190,10 @@ function dcn_render_sections($atts) {
     'menu_class' => 'dcn-nav',
   ]);
 
-  foreach ($items as $item) {
-    if ($item->object !== 'page') continue;
-
+  // sections
+  foreach ($pages as $item) {
     $pid  = $item->object_id;
-    $slug = sanitize_html_class(get_post_field('post_name', $pid) ?: 'home');
+    $slug = sanitize_html_class(get_post_field('post_name',$pid) ?: 'home');
 
     if (
       class_exists('Elementor\Plugin')
@@ -190,12 +204,19 @@ function dcn_render_sections($atts) {
                    ->get_builder_content_for_display($pid);
     } else {
       $post    = get_post($pid);
-      $content = apply_filters('the_content', $post->post_content);
+      $content = apply_filters('the_content',$post->post_content);
     }
 
     $out .= "<div id=\"{$slug}\" class=\"dcn-section\">{$content}</div>\n";
   }
 
   $out .= '</div>';
+
+  // spacer to create scroll height = (panels - 1) full viewports
+  if ($count > 1) {
+    $spacer_vh = ($count - 1) * 100;
+    $out      .= "<div class=\"dcn-spacer\" style=\"height:{$spacer_vh}vh\"></div>";
+  }
+
   return $out;
 }
