@@ -2,8 +2,8 @@
 /*
 Plugin Name: 3D Curtain Navigation
 Plugin URI: https://github.com/stronganchor/3d-curtain-navigation/
-Description: Adds a 3D curtain-like page transition effect by animating full-screen sections using GSAP. Includes a shortcode to auto-render sections & navigation so no manual markup is required, and supports Elementor-built pages. Allows scrolling to cycle through sections with true 3D transitions whose speed matches your scroll velocity.
-Version: 1.10
+Description: Adds a 3D curtain-like page transition effect by animating full-screen sections using GSAP. Scroll speed is now directly mapped to the curtain animation.
+Version: 1.11
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
@@ -25,7 +25,7 @@ function dcn_filter_menu_links( $atts, $item, $args, $depth ) {
         $path = parse_url( $url, PHP_URL_PATH );
         $slug = trim( $path, '/' ) ?: 'home';
         $atts['data-dcn-url'] = esc_url( $url );
-        $atts['href'] = '#' . sanitize_html_class( $slug );
+        $atts['href']         = '#' . sanitize_html_class( $slug );
     }
     return $atts;
 }
@@ -71,10 +71,8 @@ html, body {
 }
 .dcn-section {
   position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
   transform-style: preserve-3d;
   transform-origin: center center;
   opacity: 0;
@@ -91,102 +89,74 @@ function dcn_inline_js() {
   gsap.registerPlugin(ScrollTrigger);
 
   document.addEventListener('DOMContentLoaded', function(){
-    var sections = {}, order = [];
-    document.querySelectorAll('.dcn-section').forEach(function(sec, idx){
-      var id = sec.id || 'home';
+    const wrapper  = document.querySelector('.dcn-wrapper');
+    const sections = {};
+    const order    = [];
+
+    // gather sections
+    document.querySelectorAll('.dcn-section').forEach((sec, idx) => {
+      const id = sec.id || 'home';
       sections[id] = sec;
       order.push(id);
-      if(idx === 0) sec.classList.add('current');
+      if (idx === 0) {
+        sec.classList.add('current');
+        gsap.set(sec, { z: 0, autoAlpha: 1 });
+      }
     });
 
-    var curIndex = 0,
-        animating = false;
+    // build a master timeline where each section exit + entry spans 1 unit
+    const tl = gsap.timeline({
+      scrollTrigger: {
+        trigger:    wrapper,
+        start:      'top top',
+        end:        () => '+=' + (window.innerHeight * (order.length - 1)),
+        scrub:      0.1,                    // ties playhead to scroll, smoothing of 0.1s
+        snap:       1 / (order.length - 1), // snap to nearest section on release
+        pin:        true,                   // lock wrapper while scrolling
+        anticipatePin: 1
+      }
+    });
 
-    // now accepts optional durationOverride
-    function goTo(i, url, durationOverride) {
-      if (animating || i === curIndex || i < 0 || i >= order.length) return;
-      animating = true;
+    // for each section after the first, add exit + enter tweens at timeline positions 0,1,2...
+    order.forEach((id, i) => {
+      if (i === 0) return;
+      const prev = sections[ order[i-1] ];
+      const cur  = sections[id];
 
-      var cur = sections[order[curIndex]],
-          nxt = sections[order[i]],
-          dur = (typeof durationOverride === 'number') ? durationOverride : 1,
-          tl  = gsap.timeline({
-            onComplete: function() {
-              cur.classList.remove('current');
-              curIndex = i;
-              history.pushState(null, '', url || '#' + order[i]);
-              animating = false;
-            }
-          });
+      // exit previous
+      tl.to(prev, {
+        z:         300,
+        opacity:   0,
+        duration:  1,
+        ease:      'power2.in'
+      }, i - 1);
 
-      // Exit current: move forward in Z & fade
+      // prep next just behind camera
+      tl.set(cur, {
+        z:         -300,
+        opacity:   0
+      }, i - 1 + 0.01);
+
+      // enter next
       tl.to(cur, {
-        z:      300,
-        opacity: 0,
-        duration: dur,
-        ease:    'power2.in'
-      });
-
-      // Show next immediately
-      tl.add(function(){ nxt.classList.add('current'); }, '+=0');
-
-      // Entrance next: move from behind and fade in
-      tl.fromTo(nxt,
-        { z: -300, opacity: 0 },
-        { z:  0,   opacity: 1, duration: dur, ease: 'power2.out' },
-        '>-0.1'
-      );
-    }
-
-    // Click nav
-    document.querySelectorAll('.dcn-nav a').forEach(function(link){
-      var target = link.getAttribute('href').replace('#',''),
-          orig   = link.dataset.dcnUrl;
-      if (!(target in sections)) return;
-      link.addEventListener('click', function(e){
-        e.preventDefault();
-        goTo(order.indexOf(target), orig);
-      });
-    });
-
-    // Wheel → speed-based duration
-    window.addEventListener('wheel', function(e){
-      var delta = Math.abs(e.deltaY),
-          minDur = 0.2,
-          maxDur = 1.5,
-          // map delta [0 … 2000] → duration [maxDur … minDur]
-          dur     = maxDur - ( Math.min(delta,2000) / 2000 ) * (maxDur - minDur);
-
-      if (e.deltaY > 10)    goTo(curIndex + 1, null, dur);
-      else if (e.deltaY < -10) goTo(curIndex - 1, null, dur);
-    }, { passive:true });
-
-    // Keyboard arrows / page up-down
-    window.addEventListener('keydown', function(e){
-      if (e.key==='ArrowDown' || e.key==='PageDown') {
-        e.preventDefault();
-        goTo(curIndex + 1);
-      }
-      if (e.key==='ArrowUp' || e.key==='PageUp') {
-        e.preventDefault();
-        goTo(curIndex - 1);
-      }
-    });
-
-    // Snap-based scrollbar/touch fallback
-    ScrollTrigger.create({
-      start: 0,
-      end: () => window.innerHeight * (order.length - 1),
-      snap: {
-        snapTo: i => Math.round(i / window.innerHeight) * window.innerHeight
-      }
+        z:         0,
+        opacity:   1,
+        duration:  1,
+        ease:      'power2.out',
+        onStart: () => {
+          // swap "current" class for styling if you need it
+          document.querySelectorAll('.dcn-section.current')
+            .forEach(el => el.classList.remove('current'));
+          cur.classList.add('current');
+        }
+      }, i - 1 + 0.01);
     });
   });
 })();
 JS;
 }
 
-// Shortcode to output nav + sections
+// Shortcode to output nav + sections wrapped in our 3D stage
 add_shortcode('dcn_sections', 'dcn_render_sections');
 function dcn_render_sections($atts) {
   $atts = shortcode_atts(['menu' => 'primary'], $atts, 'dcn_sections');
@@ -197,7 +167,6 @@ function dcn_render_sections($atts) {
   $menu  = wp_get_nav_menu_object($locs[$atts['menu']]);
   $items = wp_get_nav_menu_items($menu->term_id);
 
-  // wrap everything in our self-contained 3D stage
   $out  = '<div class="dcn-wrapper">';
   $out .= wp_nav_menu([
     'menu'       => $menu->term_id,
