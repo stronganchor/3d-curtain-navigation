@@ -50,10 +50,38 @@ function dcn_enqueue_assets() {
 
 function dcn_inline_css() {
     return <<<CSS
-html, body { height:100%; overflow:hidden; margin:0; perspective:1000px; }
-.dcn-nav { position:fixed; top:0; width:100%; z-index:999; }
-.dcn-section { position:absolute; top:0; left:0; width:100%; height:100%; transform-style:preserve-3d; transform-origin:center center; transform:translateZ(0); opacity:0; }
-.dcn-section.current { opacity:1; }
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+}
+.dcn-wrapper {
+  position: relative;
+  width: 100%;
+  height: 100vh;
+  overflow: hidden;
+  perspective: 1000px;
+  perspective-origin: center center;
+}
+.dcn-nav {
+  position: fixed;
+  top: 0;
+  width: 100%;
+  z-index: 999;
+}
+.dcn-section {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  transform-origin: center center;
+  opacity: 0;
+}
+.dcn-section.current {
+  opacity: 1;
+}
 CSS;
 }
 
@@ -101,11 +129,20 @@ function dcn_inline_js() {
       });
     });
     // Wheel
-    window.addEventListener('wheel', function(e){ if (e.deltaY > 10) goTo(curIndex + 1); else if (e.deltaY < -10) goTo(curIndex - 1); }, { passive:true });
+    window.addEventListener('wheel', function(e){
+      if (e.deltaY > 10) goTo(curIndex + 1);
+      else if (e.deltaY < -10) goTo(curIndex - 1);
+    }, { passive:true });
     // Keyboard
     window.addEventListener('keydown', function(e){
-      if (e.key === 'ArrowDown' || e.key === 'PageDown') { e.preventDefault(); goTo(curIndex + 1); }
-      if (e.key === 'ArrowUp'   || e.key === 'PageUp')   { e.preventDefault(); goTo(curIndex - 1); }
+      if (e.key === 'ArrowDown' || e.key === 'PageDown') {
+        e.preventDefault();
+        goTo(curIndex + 1);
+      }
+      if (e.key === 'ArrowUp'   || e.key === 'PageUp') {
+        e.preventDefault();
+        goTo(curIndex - 1);
+      }
     });
     // Snap for scrollbar/touch
     ScrollTrigger.create({
@@ -118,7 +155,7 @@ function dcn_inline_js() {
 JS;
 }
 
-// Shortcode to output nav + sections
+// Shortcode to output nav + sections, wrapped in a self-contained 3D stage
 add_shortcode('dcn_sections', 'dcn_render_sections');
 function dcn_render_sections($atts) {
   $atts = shortcode_atts(['menu' => 'primary'], $atts, 'dcn_sections');
@@ -129,9 +166,17 @@ function dcn_render_sections($atts) {
   $menu  = wp_get_nav_menu_object($locs[$atts['menu']]);
   $items = wp_get_nav_menu_items($menu->term_id);
 
-  $nav = wp_nav_menu([ 'menu' => $menu->term_id, 'container' => '', 'echo' => false, 'menu_class' => 'dcn-nav' ]);
-  $out = $nav;
+  // Start our 3D wrapper
+  $out  = '<div class="dcn-wrapper">';
+  // Render the nav
+  $out .= wp_nav_menu([
+    'menu'       => $menu->term_id,
+    'container'  => '',
+    'echo'       => false,
+    'menu_class' => 'dcn-nav',
+  ]);
 
+  // Render each page as a full-screen section
   foreach ($items as $item) {
     if ($item->object !== 'page') {
       continue;
@@ -139,8 +184,12 @@ function dcn_render_sections($atts) {
     $pid  = $item->object_id;
     $slug = sanitize_html_class(get_post_field('post_name', $pid) ?: 'home');
 
-    if ( class_exists('Elementor\Plugin') && \Elementor\Plugin::instance()->db->is_built_with_elementor($pid) ) {
-      $content = \Elementor\Plugin::instance()->frontend->get_builder_content_for_display($pid);
+    if ( class_exists('Elementor\Plugin')
+      && \Elementor\Plugin::instance()->db->is_built_with_elementor($pid)
+    ) {
+      $content = \Elementor\Plugin::instance()
+                   ->frontend
+                   ->get_builder_content_for_display($pid);
     } else {
       $post    = get_post($pid);
       $content = apply_filters('the_content', $post->post_content);
@@ -149,5 +198,7 @@ function dcn_render_sections($atts) {
     $out .= "<div id=\"{$slug}\" class=\"dcn-section\">{$content}</div>\n";
   }
 
+  // Close the wrapper
+  $out .= '</div>';
   return $out;
 }
